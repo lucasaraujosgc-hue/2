@@ -6,7 +6,7 @@ import {
 import { UploadCloud, Loader2, Calendar, TrendingUp, TrendingDown, BookOpen, Users, X, Trash2, CheckCircle2, ChevronRight, AlertCircle, CheckSquare, Square, FileSpreadsheet, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { 
   ProcessedRecord, processMultipleFiles, processMappedData, getAvailableWeeks, getSchoolsByColor, getSchoolComparisons, 
-  getGeneralAverage, getEvolutionData, extractDateRange
+  getGeneralAverage, getEvolutionData, extractDateRange, getSchoolOverallAverages
 } from './utils';
 
 const getSemaforoColor = (pct: number, type: string) => {
@@ -79,6 +79,7 @@ export default function App() {
   const [filterText, setFilterText] = useState('');
   const [sortCol, setSortCol] = useState<'escola' | 'porcentagem'>('escola');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [tableViewMode, setTableViewMode] = useState<'semana' | 'geral'>('semana');
 
   useEffect(() => {
     fetchData();
@@ -215,9 +216,12 @@ export default function App() {
   const evolutionAvgNum = parseFloat(evolutionAvg);
 
   const selectedSchoolData = useMemo(() => selectedSchool ? getEvolutionData(data, selectedSchool, activeTab) : [], [data, selectedSchool, activeTab]);
+  const overallAverages = useMemo(() => getSchoolOverallAverages(data, activeTab), [data, activeTab]);
 
   const filteredAndSortedSchools = useMemo(() => {
-    let list = data.filter(d => d.semana === selectedWeek && d.tipo === activeTab);
+    let list = tableViewMode === 'semana'
+       ? data.filter(d => d.semana === selectedWeek && d.tipo === activeTab)
+       : overallAverages;
     
     if (filterText.trim()) {
        const lowerFilter = filterText.toLowerCase();
@@ -233,7 +237,7 @@ export default function App() {
     });
 
     return list;
-  }, [data, selectedWeek, activeTab, filterText, sortCol, sortDir]);
+  }, [data, selectedWeek, activeTab, filterText, sortCol, sortDir, tableViewMode, overallAverages]);
 
   const toggleSort = (col: 'escola' | 'porcentagem') => {
     if (sortCol === col) {
@@ -500,13 +504,13 @@ export default function App() {
                  </ul>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 md:col-span-1">
-                 <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Evolução Geral (Todas as Semanas)</h3>
-                 <div className="h-[100px] w-full">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 md:col-span-1 flex flex-col">
+                 <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 shrink-0">Evolução Geral (Todas as Semanas)</h3>
+                 <div className="h-[140px] w-full grow">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={generalAverages}>
-                        <XAxis dataKey="semana" hide />
-                        <YAxis domain={['dataMin - 2', 'dataMax + 2']} hide />
+                      <LineChart data={generalAverages} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                        <XAxis dataKey="semana" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
+                        <YAxis domain={['auto', 'auto']} tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} />
                         <RechartsTooltip 
                           contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                           formatter={(value: number) => [`${value}%`, 'Média']}
@@ -643,23 +647,50 @@ export default function App() {
 
             {/* Full List */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[600px]">
-              <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50 shrink-0">
-                <div>
-                  <h3 className="font-semibold text-slate-800">Todas as Escolas - {selectedWeek}</h3>
+              <div className="px-6 py-4 border-b border-slate-200 flex flex-col lg:flex-row justify-between items-center gap-4 bg-slate-50 shrink-0">
+                <div className="flex-1">
+                  <h3 className="font-semibold text-slate-800">
+                    Todas as Escolas - {tableViewMode === 'semana' ? selectedWeek : 'Média Geral'}
+                  </h3>
                   <span className="text-xs text-slate-500">Clique em uma escola para ver o histórico</span>
                 </div>
                 
-                <div className="relative w-full sm:w-auto">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Search className="h-4 w-4 text-slate-400" />
+                <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
+                  <div className="flex bg-slate-100 p-1 rounded-lg w-full sm:w-auto">
+                    <button
+                      onClick={() => setTableViewMode('semana')}
+                      className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        tableViewMode === 'semana'
+                          ? 'bg-white text-indigo-700 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Por Semana
+                    </button>
+                    <button
+                      onClick={() => setTableViewMode('geral')}
+                      className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        tableViewMode === 'geral'
+                          ? 'bg-white text-indigo-700 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Média Geral
+                    </button>
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Pesquisar escola..."
-                    value={filterText}
-                    onChange={(e) => setFilterText(e.target.value)}
-                    className="block w-full sm:w-64 pl-10 pr-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-indigo-500 focus:border-indigo-500"
-                  />
+
+                  <div className="relative w-full sm:w-64">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Search className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Pesquisar escola..."
+                      value={filterText}
+                      onChange={(e) => setFilterText(e.target.value)}
+                      className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="overflow-y-auto grow">

@@ -265,6 +265,26 @@ export function getGeneralAverage(data: ProcessedRecord[], tipo: string) {
   })).sort((a, b) => parseDateForSort(a.semana) - parseDateForSort(b.semana));
 }
 
+export function getSchoolOverallAverages(data: ProcessedRecord[], tipo: string): ProcessedRecord[] {
+  const filtered = data.filter(d => d.tipo === tipo);
+  const bySchool = new Map<string, { total: number, count: number }>();
+  
+  filtered.forEach(d => {
+    if (!bySchool.has(d.escola)) bySchool.set(d.escola, { total: 0, count: 0 });
+    const entry = bySchool.get(d.escola)!;
+    entry.total += d.porcentagem;
+    entry.count += 1;
+  });
+
+  return Array.from(bySchool.entries()).map(([escola, stats], index) => ({
+    id: `avg-${index}-${escola}`,
+    escola,
+    porcentagem: Number((stats.total / stats.count).toFixed(2)),
+    semana: 'Média Geral',
+    tipo
+  }));
+}
+
 export function getAvailableWeeks(data: ProcessedRecord[], tipo: string) {
   const weeks = new Set(data.filter(d => d.tipo === tipo).map(d => d.semana));
   return Array.from(weeks).sort((a, b) => parseDateForSort(a) - parseDateForSort(b));
