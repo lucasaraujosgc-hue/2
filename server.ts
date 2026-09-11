@@ -68,6 +68,52 @@ async function startServer() {
     }
   });
 
+  app.put("/api/frequencia/:id", (req, res) => {
+    try {
+      const id = req.params.id;
+      const { escola, porcentagem, semana } = req.body;
+      db.prepare('UPDATE frequencia SET escola = ?, porcentagem = ?, semana = ? WHERE id = ?').run(escola, porcentagem, semana, id);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error updating frequencia", err);
+      res.status(500).json({ error: "Failed to update frequencia" });
+    }
+  });
+
+  app.put("/api/frequencia/school/:tipo/:oldEscola", (req, res) => {
+    try {
+      const { tipo, oldEscola } = req.params;
+      const { newEscola } = req.body;
+      db.prepare('UPDATE frequencia SET escola = ? WHERE tipo = ? AND escola = ?').run(newEscola, tipo, oldEscola);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error updating school name", err);
+      res.status(500).json({ error: "Failed to update school name" });
+    }
+  });
+
+  app.delete("/api/frequencia/school/:tipo/:escola", (req, res) => {
+    try {
+      const { tipo, escola } = req.params;
+      db.prepare('DELETE FROM frequencia WHERE tipo = ? AND escola = ?').run(tipo, escola);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error deleting school", err);
+      res.status(500).json({ error: "Failed to delete school" });
+    }
+  });
+
+  app.delete("/api/frequencia/period/:tipo/:semana", (req, res) => {
+    try {
+      const { tipo, semana } = req.params;
+      db.prepare('DELETE FROM frequencia WHERE tipo = ? AND semana = ?').run(tipo, semana);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error deleting period", err);
+      res.status(500).json({ error: "Failed to delete period" });
+    }
+  });
+
   app.delete("/api/frequencia/clear/:tipo", (req, res) => {
     try {
       const tipo = req.params.tipo;

@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   BarChart, Bar, Cell
 } from 'recharts';
-import { UploadCloud, Loader2, Calendar, TrendingUp, TrendingDown, BookOpen, Users, X, Trash2, CheckCircle2, ChevronRight, AlertCircle, CheckSquare, Square, FileSpreadsheet, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { UploadCloud, Loader2, Calendar, TrendingUp, TrendingDown, BookOpen, Users, X, Trash2, CheckCircle2, ChevronRight, AlertCircle, CheckSquare, Square, FileSpreadsheet, Search, ArrowUpDown, ArrowUp, ArrowDown, Edit2 } from 'lucide-react';
 import { 
   ProcessedRecord, processMultipleFiles, processMappedData, getAvailableWeeks, getSchoolsByColor, getSchoolComparisons, 
   getGeneralAverage, getEvolutionData, extractDateRange, getSchoolOverallAverages
@@ -74,6 +74,9 @@ export default function App() {
   const [selectedWeek, setSelectedWeek] = useState<string>('');
   const [selectedSchool, setSelectedSchool] = useState<string | null>(null);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [isDeletePeriodConfirmOpen, setIsDeletePeriodConfirmOpen] = useState(false);
+  const [isDeleteSchoolConfirmOpen, setIsDeleteSchoolConfirmOpen] = useState<{escola: string} | null>(null);
+  const [isEditRecordModalOpen, setIsEditRecordModalOpen] = useState<ProcessedRecord | null>(null);
 
   // Table filtering and sorting state
   const [filterText, setFilterText] = useState('');
@@ -197,6 +200,48 @@ export default function App() {
       fetchData();
     } catch (err) {
       console.error("Error clearing data:", err);
+    }
+  };
+
+  const handleConfirmDeletePeriod = async () => {
+    setIsDeletePeriodConfirmOpen(false);
+    try {
+      await fetch(`/api/frequencia/period/${activeTab}/${encodeURIComponent(selectedWeek)}`, { method: 'DELETE' });
+      fetchData();
+    } catch (err) {
+      console.error("Error deleting period:", err);
+    }
+  };
+
+  const handleConfirmDeleteSchool = async () => {
+    if (!isDeleteSchoolConfirmOpen) return;
+    try {
+      await fetch(`/api/frequencia/school/${activeTab}/${encodeURIComponent(isDeleteSchoolConfirmOpen.escola)}`, { method: 'DELETE' });
+      setIsDeleteSchoolConfirmOpen(null);
+      if (selectedSchool === isDeleteSchoolConfirmOpen.escola) setSelectedSchool(null);
+      fetchData();
+    } catch (err) {
+      console.error("Error deleting school:", err);
+    }
+  };
+
+  const handleEditRecordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isEditRecordModalOpen) return;
+    try {
+      await fetch(`/api/frequencia/${isEditRecordModalOpen.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          escola: isEditRecordModalOpen.escola,
+          porcentagem: isEditRecordModalOpen.porcentagem,
+          semana: isEditRecordModalOpen.semana
+        })
+      });
+      setIsEditRecordModalOpen(null);
+      fetchData();
+    } catch (err) {
+      console.error("Error editing record:", err);
     }
   };
 
@@ -407,17 +452,28 @@ export default function App() {
               <Calendar className="w-4 h-4 text-slate-400" />
               Período Selecionado:
             </label>
-            <select
-              value={selectedWeek}
-              onChange={(e) => setSelectedWeek(e.target.value)}
-              className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500 min-w-[200px]"
-              disabled={availableWeeks.length === 0}
-            >
-              {availableWeeks.length === 0 && <option value="">Sem dados...</option>}
-              {availableWeeks.map(w => (
-                <option key={w} value={w}>{w}</option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedWeek}
+                onChange={(e) => setSelectedWeek(e.target.value)}
+                className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500 min-w-[200px]"
+                disabled={availableWeeks.length === 0}
+              >
+                {availableWeeks.length === 0 && <option value="">Sem dados...</option>}
+                {availableWeeks.map(w => (
+                  <option key={w} value={w}>{w}</option>
+                ))}
+              </select>
+              {availableWeeks.length > 0 && (
+                <button
+                  onClick={() => setIsDeletePeriodConfirmOpen(true)}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                  title="Excluir período selecionado"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex gap-3">
@@ -719,21 +775,46 @@ export default function App() {
                           </span>
                         </div>
                       </th>
+                      <th className="px-6 py-4 font-medium text-right w-24">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredAndSortedSchools.map((s) => (
-                      <tr key={s.id} className="hover:bg-slate-50 cursor-pointer transition-colors group" onClick={() => setSelectedSchool(s.escola)}>
-                        <td className="px-6 py-3 font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">{s.escola}</td>
-                        <td className="px-6 py-3 text-right text-slate-800 font-medium flex items-center justify-end gap-3">
-                          {s.porcentagem.toFixed(2)}%
-                          <SemaforoBadge pct={s.porcentagem} type={activeTab} />
+                      <tr key={s.id} className="hover:bg-slate-50 transition-colors group">
+                        <td className="px-6 py-3 font-medium text-slate-700 cursor-pointer group-hover:text-indigo-600 transition-colors" onClick={() => setSelectedSchool(s.escola)}>
+                          {s.escola}
+                        </td>
+                        <td className="px-6 py-3 text-right text-slate-800 font-medium cursor-pointer" onClick={() => setSelectedSchool(s.escola)}>
+                          <div className="flex items-center justify-end gap-3">
+                            {s.porcentagem.toFixed(2)}%
+                            <SemaforoBadge pct={s.porcentagem} type={activeTab} />
+                          </div>
+                        </td>
+                        <td className="px-6 py-3 text-right">
+                          <div className="flex justify-end gap-2">
+                            {tableViewMode === 'semana' && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setIsEditRecordModalOpen(s); }}
+                                className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                title="Editar registro"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setIsDeleteSchoolConfirmOpen({ escola: s.escola }); }}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                              title="Excluir escola de todos os períodos"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                     {filteredAndSortedSchools.length === 0 && (
                       <tr>
-                        <td colSpan={2} className="px-6 py-8 text-center text-slate-500">
+                        <td colSpan={3} className="px-6 py-8 text-center text-slate-500">
                           Nenhuma escola encontrada.
                         </td>
                       </tr>
@@ -895,6 +976,92 @@ export default function App() {
               <button onClick={() => setIsClearConfirmOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancelar</button>
               <button onClick={handleConfirmClear} className="px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-sm">Sim, limpar</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Period Confirmation Modal */}
+      {isDeletePeriodConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full overflow-hidden p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">Excluir período?</h3>
+            <p className="text-sm text-slate-500 mb-6">Tem certeza que deseja excluir o período <strong>{selectedWeek}</strong> de <strong>{activeTab}</strong>?</p>
+            <div className="flex justify-center gap-3">
+              <button onClick={() => setIsDeletePeriodConfirmOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancelar</button>
+              <button onClick={handleConfirmDeletePeriod} className="px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-sm">Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete School Confirmation Modal */}
+      {isDeleteSchoolConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full overflow-hidden p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">Excluir Escola?</h3>
+            <p className="text-sm text-slate-500 mb-6">Tem certeza que deseja excluir todos os dados da escola <strong>{isDeleteSchoolConfirmOpen.escola}</strong> em <strong>{activeTab}</strong>?</p>
+            <div className="flex justify-center gap-3">
+              <button onClick={() => setIsDeleteSchoolConfirmOpen(null)} className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancelar</button>
+              <button onClick={handleConfirmDeleteSchool} className="px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-sm">Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Record Modal */}
+      {isEditRecordModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden p-6">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Edit2 className="w-5 h-5 text-indigo-500" /> Editar Registro
+            </h3>
+            <form onSubmit={handleEditRecordSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Escola (Neste registro)</label>
+                <input 
+                  type="text" 
+                  value={isEditRecordModalOpen.escola}
+                  onChange={e => setIsEditRecordModalOpen({...isEditRecordModalOpen, escola: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Porcentagem (%)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={isEditRecordModalOpen.porcentagem}
+                    onChange={e => setIsEditRecordModalOpen({...isEditRecordModalOpen, porcentagem: parseFloat(e.target.value) || 0})}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Período</label>
+                  <input 
+                    type="text" 
+                    value={isEditRecordModalOpen.semana}
+                    onChange={e => setIsEditRecordModalOpen({...isEditRecordModalOpen, semana: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="pt-4 flex justify-end gap-3">
+                <button type="button" onClick={() => setIsEditRecordModalOpen(null)} className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancelar</button>
+                <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm">Salvar Alterações</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
