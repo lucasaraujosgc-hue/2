@@ -1,0 +1,8 @@
+{
+  "name": "Escolas Frequência",
+  "description": "Análise e evolução da frequência das escolas regulares e EJA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
