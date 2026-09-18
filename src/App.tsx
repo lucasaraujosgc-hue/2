@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   BarChart, Bar, Cell
 } from 'recharts';
-import { UploadCloud, Loader2, Calendar, TrendingUp, TrendingDown, BookOpen, Users, X, Trash2, CheckCircle2, ChevronRight, AlertCircle, CheckSquare, Square, FileSpreadsheet, Search, ArrowUpDown, ArrowUp, ArrowDown, Edit2 } from 'lucide-react';
+import { UploadCloud, Loader2, Calendar, TrendingUp, TrendingDown, BookOpen, Users, X, Trash2, CheckCircle2, ChevronRight, AlertCircle, CheckSquare, Square, FileSpreadsheet, Search, ArrowUpDown, ArrowUp, ArrowDown, Edit2, Save } from 'lucide-react';
 import { 
   ProcessedRecord, processMultipleFiles, processMappedData, getAvailableWeeks, getSchoolsByColor, getSchoolComparisons, 
   getGeneralAverage, getEvolutionData, extractDateRange, getSchoolOverallAverages
@@ -77,10 +77,26 @@ export default function App() {
   const [isDeletePeriodConfirmOpen, setIsDeletePeriodConfirmOpen] = useState(false);
   const [isDeleteSchoolConfirmOpen, setIsDeleteSchoolConfirmOpen] = useState<{escola: string} | null>(null);
   const [isEditRecordModalOpen, setIsEditRecordModalOpen] = useState<ProcessedRecord | null>(null);
+  const [editRecordForm, setEditRecordForm] = useState<{
+    id: string;
+    escola: string;
+    porcentagem: number;
+    semana: string;
+    matriculados: number;
+    applyToAll: boolean;
+  } | null>(null);
+
+  // Modal de Matrículas por Escola
+  const [isMatriculasModalOpen, setIsMatriculasModalOpen] = useState(false);
+  const [matriculasList, setMatriculasList] = useState<{ escola: string; matriculados: number }[]>([]);
+  const [matriculasFilter, setMatriculasFilter] = useState('');
+  const [isSavingMatriculas, setIsSavingMatriculas] = useState(false);
+  const [matriculasFeedback, setMatriculasFeedback] = useState<string | null>(null);
+  const [quickMatriculaModal, setQuickMatriculaModal] = useState<{ escola: string; matriculados: number } | null>(null);
 
   // Table filtering and sorting state
   const [filterText, setFilterText] = useState('');
-  const [sortCol, setSortCol] = useState<'escola' | 'porcentagem'>('escola');
+  const [sortCol, setSortCol] = useState<'escola' | 'porcentagem' | 'matriculados'>('escola');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [tableViewMode, setTableViewMode] = useState<'semana' | 'geral'>('semana');
 
@@ -109,7 +125,7 @@ export default function App() {
 
   // Handle Multi-File Selection
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
     if (files.length === 0) return;
     
     setIsProcessing(true);
@@ -225,23 +241,99 @@ export default function App() {
     }
   };
 
+  const handleOpenEditRecord = (rec: ProcessedRecord) => {
+    setIsEditRecordModalOpen(rec);
+    setEditRecordForm({
+      id: rec.id,
+      escola: rec.escola,
+      porcentagem: rec.porcentagem,
+      semana: rec.semana,
+      matriculados: rec.matriculados ?? 0,
+      applyToAll: true
+    });
+  };
+
   const handleEditRecordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isEditRecordModalOpen) return;
+    if (!editRecordForm) return;
     try {
-      await fetch(`/api/frequencia/${isEditRecordModalOpen.id}`, {
+      await fetch(`/api/frequencia/${editRecordForm.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          escola: isEditRecordModalOpen.escola,
-          porcentagem: isEditRecordModalOpen.porcentagem,
-          semana: isEditRecordModalOpen.semana
+          escola: editRecordForm.escola,
+          porcentagem: editRecordForm.porcentagem,
+          semana: editRecordForm.semana,
+          matriculados: editRecordForm.matriculados,
+          applyToAllPeriods: editRecordForm.applyToAll,
+          tipo: activeTab
         })
       });
       setIsEditRecordModalOpen(null);
+      setEditRecordForm(null);
       fetchData();
     } catch (err) {
       console.error("Error editing record:", err);
+    }
+  };
+
+  const openMatriculasModal = () => {
+    setIsMatriculasModalOpen(true);
+    setMatriculasFeedback(null);
+    fetch(`/api/matriculas/${activeTab}`)
+      .then(res => res.json())
+      .then(rows => {
+        if (Array.isArray(rows)) {
+          setMatriculasList(rows.map(r => ({ escola: r.escola, matriculados: r.matriculados || 0 })));
+        }
+      })
+      .catch(err => console.error("Error loading matriculas:", err));
+  };
+
+  const handleSaveMatriculas = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingMatriculas(true);
+    try {
+      const updates = matriculasList.map(m => ({
+        escola: m.escola,
+        tipo: activeTab,
+        matriculados: Math.max(0, parseInt(String(m.matriculados), 10) || 0)
+      }));
+      await fetch('/api/matriculas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates })
+      });
+      setMatriculasFeedback('Matrículas salvas com sucesso! As médias foram recalculadas.');
+      fetchData();
+      setTimeout(() => {
+        setMatriculasFeedback(null);
+      }, 3000);
+    } catch (err) {
+      console.error("Error saving matriculas:", err);
+      setMatriculasFeedback('Erro ao salvar as matrículas.');
+    } finally {
+      setIsSavingMatriculas(false);
+    }
+  };
+
+  const handleSaveQuickMatricula = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickMatriculaModal) return;
+    try {
+      await fetch('/api/matriculas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          escola: quickMatriculaModal.escola,
+          tipo: activeTab,
+          matriculados: Math.max(0, parseInt(String(quickMatriculaModal.matriculados), 10) || 0)
+        })
+      });
+      setQuickMatriculaModal(null);
+      fetchData();
+    } catch (err) {
+      console.error("Error saving quick matricula:", err);
     }
   };
 
@@ -254,7 +346,11 @@ export default function App() {
   
   const generalAverages = useMemo(() => getGeneralAverage(data, activeTab), [data, activeTab]);
   
-  const currentWeekAvg = generalAverages.find(g => g.semana === selectedWeek)?.media || 0;
+  const currentWeekObj = generalAverages.find(g => g.semana === selectedWeek);
+  const currentWeekAvg = currentWeekObj?.media || 0;
+  const currentWeekMatriculados = currentWeekObj?.totalMatriculados || 0;
+  const isCurrentWeekWeighted = currentWeekObj?.isWeighted || false;
+  
   const previousWeekIndex = generalAverages.findIndex(g => g.semana === selectedWeek) - 1;
   const previousWeekAvg = previousWeekIndex >= 0 ? generalAverages[previousWeekIndex].media : null;
   const evolutionAvg = previousWeekAvg ? (currentWeekAvg - previousWeekAvg).toFixed(2) : '0.00';
@@ -276,6 +372,10 @@ export default function App() {
     list.sort((a, b) => {
        if (sortCol === 'escola') {
          return sortDir === 'asc' ? a.escola.localeCompare(b.escola) : b.escola.localeCompare(a.escola);
+       } else if (sortCol === 'matriculados') {
+         const matA = a.matriculados ?? 0;
+         const matB = b.matriculados ?? 0;
+         return sortDir === 'asc' ? matA - matB : matB - matA;
        } else {
          return sortDir === 'asc' ? a.porcentagem - b.porcentagem : b.porcentagem - a.porcentagem;
        }
@@ -284,7 +384,7 @@ export default function App() {
     return list;
   }, [data, selectedWeek, activeTab, filterText, sortCol, sortDir, tableViewMode, overallAverages]);
 
-  const toggleSort = (col: 'escola' | 'porcentagem') => {
+  const toggleSort = (col: 'escola' | 'porcentagem' | 'matriculados') => {
     if (sortCol === col) {
       setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
     } else {
@@ -476,7 +576,16 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
+            <button 
+              onClick={openMatriculasModal}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg shadow-sm text-sm font-semibold hover:bg-indigo-100 transition-colors"
+              title="Inserir ou editar a quantidade de alunos matriculados nas escolas para cálculo ponderado"
+            >
+              <Users className="w-4 h-4 text-indigo-600" />
+              Alunos Matriculados
+            </button>
+
             <button 
               onClick={() => setIsUploadModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg shadow-sm text-sm font-medium hover:bg-indigo-700 transition-colors"
@@ -524,7 +633,18 @@ export default function App() {
                 <div className="absolute top-0 right-0 p-6 opacity-10">
                   <TrendingUp className="w-24 h-24" />
                 </div>
-                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Média Geral ({selectedWeek})</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Média Geral ({selectedWeek})</h3>
+                  {isCurrentWeekWeighted ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200" title="Média ponderada pelo número de alunos matriculados">
+                      <Users className="w-3 h-3" /> Ponderada
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full" title="Média aritmética simples. Insira as matrículas para ponderar pelo tamanho de cada escola.">
+                      Média Simples
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-baseline gap-3">
                   <span className="text-4xl font-bold text-slate-800 flex items-center gap-3">
                     {currentWeekAvg > 0 && <SemaforoBadge pct={currentWeekAvg} type={activeTab} />}
@@ -537,6 +657,19 @@ export default function App() {
                     {evolutionAvgNum > 0 ? '+' : ''}{evolutionAvg}% vs sem. anterior
                   </span>
                 )}
+                <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                  {isCurrentWeekWeighted ? (
+                    <span>Alunos ponderados: <strong className="text-slate-700 font-semibold">{currentWeekMatriculados.toLocaleString('pt-BR')}</strong></span>
+                  ) : (
+                    <span className="text-amber-600">Matrículas não cadastradas</span>
+                  )}
+                  <button 
+                    onClick={openMatriculasModal} 
+                    className="text-indigo-600 hover:text-indigo-800 font-medium hover:underline flex items-center gap-1"
+                  >
+                    Ajustar matrículas &rarr;
+                  </button>
+                </div>
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 md:col-span-1 flex flex-col justify-center">
@@ -766,6 +899,17 @@ export default function App() {
                       </th>
                       <th 
                         className="px-6 py-4 font-medium text-right cursor-pointer hover:bg-slate-50 transition-colors group"
+                        onClick={() => toggleSort('matriculados')}
+                      >
+                        <div className="flex items-center justify-end gap-2">
+                          Matriculados
+                          <span className="text-slate-400 group-hover:text-indigo-500">
+                            {sortCol === 'matriculados' ? (sortDir === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />) : <ArrowUpDown className="w-4 h-4 opacity-50" />}
+                          </span>
+                        </div>
+                      </th>
+                      <th 
+                        className="px-6 py-4 font-medium text-right cursor-pointer hover:bg-slate-50 transition-colors group"
                         onClick={() => toggleSort('porcentagem')}
                       >
                         <div className="flex items-center justify-end gap-2">
@@ -784,6 +928,24 @@ export default function App() {
                         <td className="px-6 py-3 font-medium text-slate-700 cursor-pointer group-hover:text-indigo-600 transition-colors" onClick={() => setSelectedSchool(s.escola)}>
                           {s.escola}
                         </td>
+                        <td className="px-6 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuickMatriculaModal({ escola: s.escola, matriculados: s.matriculados || 0 });
+                            }}
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md transition-colors bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 cursor-pointer"
+                            title="Clique para editar o número de alunos matriculados desta escola"
+                          >
+                            <Users className="w-3 h-3 text-slate-400 group-hover:text-indigo-500" />
+                            {typeof s.matriculados === 'number' && s.matriculados > 0 ? (
+                              <span>{s.matriculados.toLocaleString('pt-BR')}</span>
+                            ) : (
+                              <span className="text-indigo-600 font-medium">+ Inserir</span>
+                            )}
+                          </button>
+                        </td>
                         <td className="px-6 py-3 text-right text-slate-800 font-medium cursor-pointer" onClick={() => setSelectedSchool(s.escola)}>
                           <div className="flex items-center justify-end gap-3">
                             {s.porcentagem.toFixed(2)}%
@@ -794,7 +956,7 @@ export default function App() {
                           <div className="flex justify-end gap-2">
                             {tableViewMode === 'semana' && (
                               <button
-                                onClick={(e) => { e.stopPropagation(); setIsEditRecordModalOpen(s); }}
+                                onClick={(e) => { e.stopPropagation(); handleOpenEditRecord(s); }}
                                 className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
                                 title="Editar registro"
                               >
@@ -814,7 +976,7 @@ export default function App() {
                     ))}
                     {filteredAndSortedSchools.length === 0 && (
                       <tr>
-                        <td colSpan={3} className="px-6 py-8 text-center text-slate-500">
+                        <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
                           Nenhuma escola encontrada.
                         </td>
                       </tr>
@@ -1015,7 +1177,7 @@ export default function App() {
       )}
 
       {/* Edit Record Modal */}
-      {isEditRecordModalOpen && (
+      {isEditRecordModalOpen && editRecordForm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden p-6">
             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
@@ -1023,25 +1185,25 @@ export default function App() {
             </h3>
             <form onSubmit={handleEditRecordSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Escola (Neste registro)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Escola</label>
                 <input 
                   type="text" 
-                  value={isEditRecordModalOpen.escola}
-                  onChange={e => setIsEditRecordModalOpen({...isEditRecordModalOpen, escola: e.target.value})}
+                  value={editRecordForm.escola}
+                  onChange={e => setEditRecordForm({...editRecordForm, escola: e.target.value})}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                   required
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Porcentagem (%)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Frequência (%)</label>
                   <input 
                     type="number" 
                     step="0.01"
                     min="0"
                     max="100"
-                    value={isEditRecordModalOpen.porcentagem}
-                    onChange={e => setIsEditRecordModalOpen({...isEditRecordModalOpen, porcentagem: parseFloat(e.target.value) || 0})}
+                    value={editRecordForm.porcentagem}
+                    onChange={e => setEditRecordForm({...editRecordForm, porcentagem: parseFloat(e.target.value) || 0})}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                     required
                   />
@@ -1050,18 +1212,236 @@ export default function App() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Período</label>
                   <input 
                     type="text" 
-                    value={isEditRecordModalOpen.semana}
-                    onChange={e => setIsEditRecordModalOpen({...isEditRecordModalOpen, semana: e.target.value})}
+                    value={editRecordForm.semana}
+                    onChange={e => setEditRecordForm({...editRecordForm, semana: e.target.value})}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                     required
                   />
                 </div>
               </div>
-              <div className="pt-4 flex justify-end gap-3">
-                <button type="button" onClick={() => setIsEditRecordModalOpen(null)} className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancelar</button>
-                <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm">Salvar Alterações</button>
+
+              <div className="bg-indigo-50/50 border border-indigo-100 rounded-lg p-3.5 space-y-2">
+                <label className="block text-sm font-semibold text-indigo-950 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-indigo-600" />
+                  Alunos Matriculados na Escola
+                </label>
+                <p className="text-xs text-slate-500">
+                  Usado para o cálculo da média geral ponderada pelo porte da escola.
+                </p>
+                <input 
+                  type="number" 
+                  min="0"
+                  placeholder="Ex: 250"
+                  value={editRecordForm.matriculados || ''}
+                  onChange={e => setEditRecordForm({...editRecordForm, matriculados: Math.max(0, parseInt(e.target.value, 10) || 0)})}
+                  className="w-full px-3 py-2 border border-indigo-200 bg-white rounded-lg focus:ring-2 focus:ring-indigo-500 text-slate-800 font-medium"
+                />
+                <label className="flex items-center gap-2 cursor-pointer pt-1">
+                  <input 
+                    type="checkbox"
+                    checked={editRecordForm.applyToAll}
+                    onChange={e => setEditRecordForm({...editRecordForm, applyToAll: e.target.checked})}
+                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                  />
+                  <span className="text-xs text-slate-700 font-medium">
+                    Aplicar este número de matrículas a todos os períodos desta escola
+                  </span>
+                </label>
+              </div>
+
+              <div className="pt-3 flex justify-end gap-3 border-t border-slate-100">
+                <button 
+                  type="button" 
+                  onClick={() => { setIsEditRecordModalOpen(null); setEditRecordForm(null); }} 
+                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm"
+                >
+                  Salvar Alterações
+                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Single School Matricula Modal */}
+      {quickMatriculaModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setQuickMatriculaModal(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full overflow-hidden p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Users className="w-5 h-5 text-indigo-600" /> Matrículas da Escola
+              </h3>
+              <button onClick={() => setQuickMatriculaModal(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm font-semibold text-slate-700 mb-1">{quickMatriculaModal.escola}</p>
+            <p className="text-xs text-slate-500 mb-4">
+              Informe a quantidade total de alunos para que a frequência desta escola seja ponderada corretamente na média geral ({activeTab}).
+            </p>
+            <form onSubmit={handleSaveQuickMatricula} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
+                  Número de Alunos Matriculados
+                </label>
+                <input 
+                  type="number"
+                  min="0"
+                  autoFocus
+                  placeholder="Ex: 350"
+                  value={quickMatriculaModal.matriculados || ''}
+                  onChange={e => setQuickMatriculaModal({...quickMatriculaModal, matriculados: Math.max(0, parseInt(e.target.value, 10) || 0)})}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-800 text-lg"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setQuickMatriculaModal(null)} 
+                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm"
+                >
+                  Salvar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Matriculas Modal */}
+      {isMatriculasModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full flex flex-col max-h-[90vh] overflow-hidden">
+            
+            {/* Header */}
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">
+                    Alunos Matriculados por Escola - {activeTab}
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Insira o total de alunos para ponderar a média geral com justiça e precisão estatística.
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setIsMatriculasModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick summary stats bar & Filter */}
+            <div className="p-4 border-b border-slate-200 bg-white shrink-0 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-6 text-sm">
+                <div>
+                  <span className="text-slate-500">Escolas: </span>
+                  <strong className="text-slate-800">{matriculasList.length}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-500">Total de Alunos Matriculados: </span>
+                  <strong className="text-indigo-600">
+                    {matriculasList.reduce((acc, m) => acc + (parseInt(String(m.matriculados), 10) || 0), 0).toLocaleString('pt-BR')}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Search className="h-4 w-4 text-slate-400" />
+                </div>
+                <input 
+                  type="text" 
+                  placeholder="Pesquisar escola..." 
+                  value={matriculasFilter}
+                  onChange={e => setMatriculasFilter(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Feedback notification */}
+            {matriculasFeedback && (
+              <div className={`mx-6 mt-4 p-3 rounded-lg text-sm flex items-center gap-2 shrink-0 ${matriculasFeedback.includes('sucesso') ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{matriculasFeedback}</span>
+              </div>
+            )}
+
+            {/* School list */}
+            <div className="p-6 overflow-y-auto grow space-y-2">
+              {matriculasList.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 text-sm">
+                  Nenhuma escola encontrada para {activeTab}. Importe uma planilha primeiro.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {matriculasList
+                    .filter(m => !matriculasFilter.trim() || m.escola.toLowerCase().includes(matriculasFilter.toLowerCase()))
+                    .map((item) => (
+                      <div key={item.escola} className="p-3 rounded-lg border border-slate-200 hover:border-indigo-300 bg-slate-50/50 hover:bg-white transition-all flex items-center justify-between gap-3">
+                        <span className="text-xs font-semibold text-slate-700 truncate flex-1" title={item.escola}>
+                          {item.escola}
+                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <label className="text-xs text-slate-400">Alunos:</label>
+                          <input 
+                            type="number" 
+                            min="0"
+                            placeholder="0"
+                            value={item.matriculados || ''}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                              setMatriculasList(prev => prev.map(m => m.escola === item.escola ? { ...m, matriculados: val } : m));
+                            }}
+                            className="w-24 px-2.5 py-1.5 text-sm text-right font-semibold border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 bg-white"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
+              <span className="text-xs text-slate-500">
+                O valor informado é aplicado automaticamente para todos os períodos da escola.
+              </span>
+              <div className="flex gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => setIsMatriculasModalOpen(false)}
+                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
+                >
+                  Fechar
+                </button>
+                <button 
+                  type="button"
+                  onClick={handleSaveMatriculas}
+                  disabled={isSavingMatriculas || matriculasList.length === 0}
+                  className="flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                >
+                  {isSavingMatriculas ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Salvar Matrículas
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

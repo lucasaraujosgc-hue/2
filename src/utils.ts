@@ -6,6 +6,7 @@ export interface ProcessedRecord {
   porcentagem: number;
   semana: string;
   tipo: string;
+  matriculados?: number | null;
 }
 
 export function extractDateRange(header: string): string {
@@ -250,28 +251,74 @@ export function getSchoolComparisons(data: ProcessedRecord[], currentWeek: strin
 
 export function getGeneralAverage(data: ProcessedRecord[], tipo: string) {
   const filtered = data.filter(d => d.tipo === tipo);
-  const bySemana = new Map<string, { total: number, count: number }>();
+  const bySemana = new Map<string, { 
+    totalWeighted: number; 
+    totalWeight: number; 
+    hasAnyMatriculados: boolean;
+    count: number; 
+    totalSimplePct: number;
+    totalMatriculadosCount: number;
+  }>();
   
   filtered.forEach(d => {
-    if (!bySemana.has(d.semana)) bySemana.set(d.semana, { total: 0, count: 0 });
+    if (!bySemana.has(d.semana)) {
+      bySemana.set(d.semana, { 
+        totalWeighted: 0, 
+        totalWeight: 0, 
+        hasAnyMatriculados: false,
+        count: 0, 
+        totalSimplePct: 0,
+        totalMatriculadosCount: 0
+      });
+    }
     const entry = bySemana.get(d.semana)!;
-    entry.total += d.porcentagem;
+    const hasMat = typeof d.matriculados === 'number' && d.matriculados > 0;
+    const weight = hasMat ? (d.matriculados as number) : 1;
+    
+    if (hasMat) {
+      entry.hasAnyMatriculados = true;
+      entry.totalMatriculadosCount += d.matriculados as number;
+    }
+    
+    entry.totalWeighted += d.porcentagem * weight;
+    entry.totalWeight += weight;
+    entry.totalSimplePct += d.porcentagem;
     entry.count += 1;
   });
 
-  return Array.from(bySemana.entries()).map(([semana, stats]) => ({
-    semana,
-    media: Number((stats.total / stats.count).toFixed(2))
-  })).sort((a, b) => parseDateForSort(a.semana) - parseDateForSort(b.semana));
+  return Array.from(bySemana.entries()).map(([semana, stats]) => {
+    let media = 0;
+    if (stats.hasAnyMatriculados) {
+      media = stats.totalWeight > 0 
+        ? Number((stats.totalWeighted / stats.totalWeight).toFixed(2))
+        : 0;
+    } else {
+      media = stats.count > 0 
+        ? Number((stats.totalSimplePct / stats.count).toFixed(2)) 
+        : 0;
+    }
+
+    return {
+      semana,
+      media,
+      totalMatriculados: stats.totalMatriculadosCount,
+      isWeighted: stats.hasAnyMatriculados
+    };
+  }).sort((a, b) => parseDateForSort(a.semana) - parseDateForSort(b.semana));
 }
 
 export function getSchoolOverallAverages(data: ProcessedRecord[], tipo: string): ProcessedRecord[] {
   const filtered = data.filter(d => d.tipo === tipo);
-  const bySchool = new Map<string, { total: number, count: number }>();
+  const bySchool = new Map<string, { total: number, count: number, matriculados: number | null }>();
   
   filtered.forEach(d => {
-    if (!bySchool.has(d.escola)) bySchool.set(d.escola, { total: 0, count: 0 });
+    if (!bySchool.has(d.escola)) {
+      bySchool.set(d.escola, { total: 0, count: 0, matriculados: d.matriculados ?? null });
+    }
     const entry = bySchool.get(d.escola)!;
+    if ((d.matriculados ?? null) !== null && entry.matriculados === null) {
+      entry.matriculados = d.matriculados!;
+    }
     entry.total += d.porcentagem;
     entry.count += 1;
   });
@@ -281,7 +328,8 @@ export function getSchoolOverallAverages(data: ProcessedRecord[], tipo: string):
     escola,
     porcentagem: Number((stats.total / stats.count).toFixed(2)),
     semana: 'Média Geral',
-    tipo
+    tipo,
+    matriculados: stats.matriculados
   }));
 }
 

@@ -25,4 +25,17 @@ db.exec(`
     tipo TEXT,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS escola_matriculas (
+    escola TEXT,
+    tipo TEXT,
+    matriculados INTEGER DEFAULT 0,
+    PRIMARY KEY (escola, tipo)
+  );
 `);
+
+try {
+  db.exec(`ALTER TABLE frequencia ADD COLUMN matriculados INTEGER DEFAULT NULL;`);
+} catch {
+  // Ignora se a coluna já existir
+}

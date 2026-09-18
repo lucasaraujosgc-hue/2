@@ -23,11 +23,88 @@ async function startServer() {
   // API frequencia
   app.get("/api/frequencia", (req, res) => {
     try {
-      const rows = db.prepare('SELECT * FROM frequencia ORDER BY semana ASC, escola ASC').all();
+      const rows = db.prepare(`
+        SELECT 
+          f.id, 
+          f.escola, 
+          f.porcentagem, 
+          f.semana, 
+          f.tipo, 
+          f.createdAt,
+          COALESCE(f.matriculados, em.matriculados, NULL) as matriculados
+        FROM frequencia f
+        LEFT JOIN escola_matriculas em ON f.escola = em.escola AND f.tipo = em.tipo
+        ORDER BY f.semana ASC, f.escola ASC
+      `).all();
       res.json(rows);
     } catch (err) {
       console.error("Error fetching frequencia", err);
       res.status(500).json({ error: "Failed to fetch frequencia" });
+    }
+  });
+
+  // API matriculas por tipo (para gerenciamento de alunos matriculados)
+  app.get("/api/matriculas/:tipo", (req, res) => {
+    try {
+      const tipo = req.params.tipo;
+      const rows = db.prepare(`
+        SELECT 
+          f.escola,
+          f.tipo,
+          COALESCE(em.matriculados, MAX(f.matriculados), 0) as matriculados
+        FROM frequencia f
+        LEFT JOIN escola_matriculas em ON f.escola = em.escola AND f.tipo = em.tipo
+        WHERE f.tipo = ?
+        GROUP BY f.escola, f.tipo
+        ORDER BY f.escola ASC
+      `).all(tipo);
+      res.json(rows);
+    } catch (err) {
+      console.error("Error fetching matriculas", err);
+      res.status(500).json({ error: "Failed to fetch matriculas" });
+    }
+  });
+
+  // Salvar ou atualizar matriculas de uma ou várias escolas
+  app.post("/api/matriculas", (req, res) => {
+    try {
+      const { escola, tipo, matriculados, updates } = req.body;
+
+      const upsertStmt = db.prepare(`
+        INSERT OR REPLACE INTO escola_matriculas (escola, tipo, matriculados)
+        VALUES (?, ?, ?)
+      `);
+
+      const updateFreqStmt = db.prepare(`
+        UPDATE frequencia SET matriculados = ?
+        WHERE escola = ? AND tipo = ?
+      `);
+
+      const saveSingle = (esc: string, tp: string, mat: number) => {
+        const val = Math.max(0, parseInt(String(mat), 10) || 0);
+        upsertStmt.run(esc, tp, val);
+        updateFreqStmt.run(val, esc, tp);
+      };
+
+      if (Array.isArray(updates)) {
+        const runTransaction = db.transaction((list: any[]) => {
+          for (const item of list) {
+            if (item.escola && item.tipo) {
+              saveSingle(item.escola, item.tipo, item.matriculados);
+            }
+          }
+        });
+        runTransaction(updates);
+      } else if (escola && tipo) {
+        saveSingle(escola, tipo, matriculados);
+      } else {
+        return res.status(400).json({ error: "Invalid payload for matriculas" });
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error saving matriculas", err);
+      res.status(500).json({ error: "Failed to save matriculas" });
     }
   });
 
@@ -41,12 +118,34 @@ async function startServer() {
       // We use a transaction for performance
       const insert = db.prepare(`
         INSERT OR REPLACE INTO frequencia 
-        (id, escola, porcentagem, semana, tipo)
-        VALUES (@id, @escola, @porcentagem, @semana, @tipo)
+        (id, escola, porcentagem, semana, tipo, matriculados)
+        VALUES (@id, @escola, @porcentagem, @semana, @tipo, @matriculados)
       `);
       
+      const getMatriculaStmt = db.prepare('SELECT matriculados FROM escola_matriculas WHERE escola = ? AND tipo = ?');
+
       const insertMany = db.transaction((rows) => {
-        for (const row of rows) insert.run(row);
+        for (const row of rows) {
+          let matriculados = row.matriculados !== undefined && row.matriculados !== null 
+            ? Math.max(0, parseInt(String(row.matriculados), 10) || 0)
+            : null;
+          
+          if (matriculados === null) {
+            const found = getMatriculaStmt.get(row.escola, row.tipo) as { matriculados?: number } | undefined;
+            if (found && typeof found.matriculados === 'number') {
+              matriculados = found.matriculados;
+            }
+          }
+
+          insert.run({
+            id: row.id,
+            escola: row.escola,
+            porcentagem: row.porcentagem,
+            semana: row.semana,
+            tipo: row.tipo,
+            matriculados: matriculados
+          });
+        }
       });
 
       insertMany(records);
@@ -71,8 +170,21 @@ async function startServer() {
   app.put("/api/frequencia/:id", (req, res) => {
     try {
       const id = req.params.id;
-      const { escola, porcentagem, semana } = req.body;
-      db.prepare('UPDATE frequencia SET escola = ?, porcentagem = ?, semana = ? WHERE id = ?').run(escola, porcentagem, semana, id);
+      const { escola, porcentagem, semana, matriculados, applyToAllPeriods, tipo } = req.body;
+      const numMatriculados = matriculados !== undefined && matriculados !== null && matriculados !== ''
+        ? Math.max(0, parseInt(String(matriculados), 10) || 0)
+        : null;
+
+      db.prepare('UPDATE frequencia SET escola = ?, porcentagem = ?, semana = ?, matriculados = ? WHERE id = ?')
+        .run(escola, porcentagem, semana, numMatriculados, id);
+
+      if (applyToAllPeriods && tipo && escola && numMatriculados !== null) {
+        db.prepare('INSERT OR REPLACE INTO escola_matriculas (escola, tipo, matriculados) VALUES (?, ?, ?)')
+          .run(escola, tipo, numMatriculados);
+        db.prepare('UPDATE frequencia SET matriculados = ? WHERE escola = ? AND tipo = ?')
+          .run(numMatriculados, escola, tipo);
+      }
+
       res.json({ success: true });
     } catch (err) {
       console.error("Error updating frequencia", err);
@@ -85,6 +197,7 @@ async function startServer() {
       const { tipo, oldEscola } = req.params;
       const { newEscola } = req.body;
       db.prepare('UPDATE frequencia SET escola = ? WHERE tipo = ? AND escola = ?').run(newEscola, tipo, oldEscola);
+      db.prepare('UPDATE escola_matriculas SET escola = ? WHERE tipo = ? AND escola = ?').run(newEscola, tipo, oldEscola);
       res.json({ success: true });
     } catch (err) {
       console.error("Error updating school name", err);
@@ -96,6 +209,7 @@ async function startServer() {
     try {
       const { tipo, escola } = req.params;
       db.prepare('DELETE FROM frequencia WHERE tipo = ? AND escola = ?').run(tipo, escola);
+      db.prepare('DELETE FROM escola_matriculas WHERE tipo = ? AND escola = ?').run(tipo, escola);
       res.json({ success: true });
     } catch (err) {
       console.error("Error deleting school", err);
