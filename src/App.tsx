@@ -96,7 +96,7 @@ export default function App() {
 
   // Table filtering and sorting state
   const [filterText, setFilterText] = useState('');
-  const [sortCol, setSortCol] = useState<'escola' | 'porcentagem' | 'matriculados'>('escola');
+  const [sortCol, setSortCol] = useState<'escola' | 'porcentagem' | 'matriculados' | 'presentes'>('escola');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [tableViewMode, setTableViewMode] = useState<'semana' | 'geral'>('semana');
 
@@ -349,7 +349,10 @@ export default function App() {
   const currentWeekObj = generalAverages.find(g => g.semana === selectedWeek);
   const currentWeekAvg = currentWeekObj?.media || 0;
   const currentWeekMatriculados = currentWeekObj?.totalMatriculados || 0;
+  const currentWeekPresentes = currentWeekObj?.totalPresentes || 0;
   const isCurrentWeekWeighted = currentWeekObj?.isWeighted || false;
+  const currentWeekEscolasComMatricula = currentWeekObj?.escolasComMatricula || 0;
+  const currentWeekTotalEscolas = currentWeekObj?.totalEscolas || 0;
   
   const previousWeekIndex = generalAverages.findIndex(g => g.semana === selectedWeek) - 1;
   const previousWeekAvg = previousWeekIndex >= 0 ? generalAverages[previousWeekIndex].media : null;
@@ -360,10 +363,21 @@ export default function App() {
   const overallAverages = useMemo(() => getSchoolOverallAverages(data, activeTab), [data, activeTab]);
 
   const filteredAndSortedSchools = useMemo(() => {
-    let list = tableViewMode === 'semana'
+    let rawList = tableViewMode === 'semana'
        ? data.filter(d => d.semana === selectedWeek && d.tipo === activeTab)
        : overallAverages;
     
+    // Normalizar e computar presentes de cada escola: presentes = (matriculados * frequencia) / 100
+    let list = rawList.map(d => {
+      const mat = typeof d.matriculados === 'number' && d.matriculados > 0 ? d.matriculados : null;
+      const pres = mat !== null ? Math.round((mat * d.porcentagem) / 100) : null;
+      return {
+        ...d,
+        matriculados: mat,
+        presentes: pres
+      };
+    });
+
     if (filterText.trim()) {
        const lowerFilter = filterText.toLowerCase();
        list = list.filter(d => d.escola.toLowerCase().includes(lowerFilter));
@@ -376,6 +390,10 @@ export default function App() {
          const matA = a.matriculados ?? 0;
          const matB = b.matriculados ?? 0;
          return sortDir === 'asc' ? matA - matB : matB - matA;
+       } else if (sortCol === 'presentes') {
+         const presA = a.presentes ?? 0;
+         const presB = b.presentes ?? 0;
+         return sortDir === 'asc' ? presA - presB : presB - presA;
        } else {
          return sortDir === 'asc' ? a.porcentagem - b.porcentagem : b.porcentagem - a.porcentagem;
        }
@@ -384,7 +402,35 @@ export default function App() {
     return list;
   }, [data, selectedWeek, activeTab, filterText, sortCol, sortDir, tableViewMode, overallAverages]);
 
-  const toggleSort = (col: 'escola' | 'porcentagem' | 'matriculados') => {
+  // Totais agregados da rede (resumo do cálculo ponderado)
+  const networkTotals = useMemo(() => {
+    let totalMat = 0;
+    let totalPres = 0;
+    let countComMat = 0;
+
+    filteredAndSortedSchools.forEach(s => {
+      if (typeof s.matriculados === 'number' && s.matriculados > 0) {
+        totalMat += s.matriculados;
+        const pres = (s.matriculados * s.porcentagem) / 100;
+        totalPres += pres;
+        countComMat += 1;
+      }
+    });
+
+    const mediaPonderada = totalMat > 0 
+      ? Number(((totalPres / totalMat) * 100).toFixed(2))
+      : 0;
+
+    return {
+      totalMatriculados: totalMat,
+      totalPresentes: Math.round(totalPres),
+      mediaPonderada,
+      countComMat,
+      totalEscolas: filteredAndSortedSchools.length
+    };
+  }, [filteredAndSortedSchools]);
+
+  const toggleSort = (col: 'escola' | 'porcentagem' | 'matriculados' | 'presentes') => {
     if (sortCol === col) {
       setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
     } else {
@@ -636,7 +682,7 @@ export default function App() {
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Média Geral ({selectedWeek})</h3>
                   {isCurrentWeekWeighted ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200" title="Média ponderada pelo número de alunos matriculados">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200" title="Média Ponderada = Total de Presentes ÷ Total de Matriculados">
                       <Users className="w-3 h-3" /> Ponderada
                     </span>
                   ) : (
@@ -652,24 +698,37 @@ export default function App() {
                   </span>
                 </div>
                 {previousWeekAvg && (
-                  <span className={`text-sm font-medium mt-2 flex items-center gap-1 ${evolutionAvgNum >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  <span className={`text-sm font-medium mt-1 flex items-center gap-1 ${evolutionAvgNum >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                     {evolutionAvgNum >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                     {evolutionAvgNum > 0 ? '+' : ''}{evolutionAvg}% vs sem. anterior
                   </span>
                 )}
-                <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                  {isCurrentWeekWeighted ? (
-                    <span>Alunos ponderados: <strong className="text-slate-700 font-semibold">{currentWeekMatriculados.toLocaleString('pt-BR')}</strong></span>
-                  ) : (
-                    <span className="text-amber-600">Matrículas não cadastradas</span>
-                  )}
-                  <button 
-                    onClick={openMatriculasModal} 
-                    className="text-indigo-600 hover:text-indigo-800 font-medium hover:underline flex items-center gap-1"
-                  >
-                    Ajustar matrículas &rarr;
-                  </button>
-                </div>
+                
+                {isCurrentWeekWeighted ? (
+                  <div className="mt-3 bg-slate-50 border border-slate-200/90 rounded-lg p-2.5 space-y-1 text-xs">
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Total Alunos Presentes:</span>
+                      <strong className="text-emerald-700 font-bold">{currentWeekPresentes.toLocaleString('pt-BR')}</strong>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Total Alunos Matriculados:</span>
+                      <strong className="text-indigo-700 font-bold">{currentWeekMatriculados.toLocaleString('pt-BR')}</strong>
+                    </div>
+                    <div className="pt-1 border-t border-slate-200 text-[11px] text-slate-500 flex justify-between items-center">
+                      <span>Cálculo: (Presentes ÷ Matriculados)</span>
+                      <span className="font-semibold text-slate-800">
+                        {currentWeekPresentes.toLocaleString('pt-BR')} ÷ {currentWeekMatriculados.toLocaleString('pt-BR')} = {currentWeekAvg.toFixed(2)}%
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-800 flex items-center justify-between">
+                    <span>Sem matrículas (média simples).</span>
+                    <button onClick={openMatriculasModal} className="font-semibold text-indigo-600 hover:underline">
+                      Cadastrar matrículas &rarr;
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 md:col-span-1 flex flex-col justify-center">
@@ -882,9 +941,25 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Formula banner */}
+              {networkTotals.totalMatriculados > 0 && (
+                <div className="bg-indigo-50/70 border-b border-indigo-100 px-6 py-2.5 text-xs text-indigo-900 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold">Cálculo da Média Ponderada da Rede:</span>
+                    <span>
+                      Multiplicação de cada escola (Matriculados × Freq) = {networkTotals.totalPresentes.toLocaleString('pt-BR')} presentes ÷ {networkTotals.totalMatriculados.toLocaleString('pt-BR')} matriculados
+                    </span>
+                  </div>
+                  <div className="font-bold text-indigo-700 bg-white px-2.5 py-1 rounded border border-indigo-200 shadow-2xs">
+                    Média da Rede: {networkTotals.mediaPonderada.toFixed(2)}%
+                  </div>
+                </div>
+              )}
+
               <div className="overflow-y-auto grow">
                 <table className="w-full text-sm text-left">
-                  <thead className="bg-white text-slate-500 text-xs uppercase sticky top-0 shadow-sm z-10">
+                  <thead className="bg-white text-slate-500 text-xs uppercase sticky top-0 shadow-sm z-10 border-b border-slate-200">
                     <tr>
                       <th 
                         className="px-6 py-4 font-medium cursor-pointer hover:bg-slate-50 transition-colors group"
@@ -905,6 +980,17 @@ export default function App() {
                           Matriculados
                           <span className="text-slate-400 group-hover:text-indigo-500">
                             {sortCol === 'matriculados' ? (sortDir === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />) : <ArrowUpDown className="w-4 h-4 opacity-50" />}
+                          </span>
+                        </div>
+                      </th>
+                      <th 
+                        className="px-6 py-4 font-medium text-right cursor-pointer hover:bg-slate-50 transition-colors group"
+                        onClick={() => toggleSort('presentes')}
+                      >
+                        <div className="flex items-center justify-end gap-2" title="Alunos presentes = Matriculados × Frequência">
+                          Presentes
+                          <span className="text-slate-400 group-hover:text-indigo-500">
+                            {sortCol === 'presentes' ? (sortDir === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />) : <ArrowUpDown className="w-4 h-4 opacity-50" />}
                           </span>
                         </div>
                       </th>
@@ -946,6 +1032,15 @@ export default function App() {
                             )}
                           </button>
                         </td>
+                        <td className="px-6 py-3 text-right font-medium">
+                          {typeof s.presentes === 'number' && s.presentes > 0 ? (
+                            <span className="inline-block text-xs font-semibold px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 border border-emerald-100" title={`${s.matriculados} matriculados × ${s.porcentagem.toFixed(2)}%`}>
+                              {s.presentes.toLocaleString('pt-BR')}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
+                        </td>
                         <td className="px-6 py-3 text-right text-slate-800 font-medium cursor-pointer" onClick={() => setSelectedSchool(s.escola)}>
                           <div className="flex items-center justify-end gap-3">
                             {s.porcentagem.toFixed(2)}%
@@ -976,12 +1071,42 @@ export default function App() {
                     ))}
                     {filteredAndSortedSchools.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
+                        <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
                           Nenhuma escola encontrada.
                         </td>
                       </tr>
                     )}
                   </tbody>
+
+                  {/* Table Footer with Network Totals */}
+                  {filteredAndSortedSchools.length > 0 && (
+                    <tfoot className="bg-slate-50/90 border-t-2 border-slate-200 font-semibold text-slate-800 text-xs uppercase sticky bottom-0">
+                      <tr>
+                        <td className="px-6 py-3.5 text-slate-700">
+                          Total da Rede ({networkTotals.totalEscolas} escolas)
+                        </td>
+                        <td className="px-6 py-3.5 text-right font-bold text-indigo-700">
+                          {networkTotals.totalMatriculados > 0 ? networkTotals.totalMatriculados.toLocaleString('pt-BR') : '-'}
+                        </td>
+                        <td className="px-6 py-3.5 text-right font-bold text-emerald-700">
+                          {networkTotals.totalPresentes > 0 ? networkTotals.totalPresentes.toLocaleString('pt-BR') : '-'}
+                        </td>
+                        <td className="px-6 py-3.5 text-right">
+                          <div className="flex items-center justify-end gap-2 text-sm font-bold text-slate-900">
+                            {networkTotals.totalMatriculados > 0 ? (
+                              <>
+                                {networkTotals.mediaPonderada.toFixed(2)}%
+                                <SemaforoBadge pct={networkTotals.mediaPonderada} type={activeTab} />
+                              </>
+                            ) : (
+                              <span className="text-xs text-slate-400 font-normal">Sem matrículas</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-3.5 text-right"></td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>

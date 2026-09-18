@@ -31,7 +31,7 @@ async function startServer() {
           f.semana, 
           f.tipo, 
           f.createdAt,
-          COALESCE(f.matriculados, em.matriculados, NULL) as matriculados
+          COALESCE(NULLIF(em.matriculados, 0), NULLIF(f.matriculados, 0), NULL) as matriculados
         FROM frequencia f
         LEFT JOIN escola_matriculas em ON f.escola = em.escola AND f.tipo = em.tipo
         ORDER BY f.semana ASC, f.escola ASC
@@ -51,7 +51,7 @@ async function startServer() {
         SELECT 
           f.escola,
           f.tipo,
-          COALESCE(em.matriculados, MAX(f.matriculados), 0) as matriculados
+          COALESCE(NULLIF(em.matriculados, 0), NULLIF(MAX(f.matriculados), 0), 0) as matriculados
         FROM frequencia f
         LEFT JOIN escola_matriculas em ON f.escola = em.escola AND f.tipo = em.tipo
         WHERE f.tipo = ?
